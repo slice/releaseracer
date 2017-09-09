@@ -157,7 +157,7 @@ class Poller:
         #: The interval at which to poll at (in seconds).
         self.poll_interval = bot.cfg.get('default_poll_interval', 60)
 
-        #: The list of pollers.
+        #: The `dict` containing poller tasks for this Poller cog instance.
         self._poller_tasks = {}
 
         # create pollers.
@@ -228,7 +228,10 @@ class Poller:
 
             # fetch main js file
             async with self.session.get(self.get_asset_url(channel, release_hashes.main)) as resp:
+                # read js
                 main = await resp.text()
+
+                # get byte size
                 size = len(main)
 
                 # match release build
@@ -286,6 +289,13 @@ class Poller:
             await ctx.send(embed=info.embed)
         except ReleaseExtractorError as ree:  # :^)
             await ctx.send(f'Extractor error! — `{ree}`')
+
+    @command()
+    @is_owner()
+    async def revive(self, ctx: Context):
+        """Kills (if not already dead) then revives the pollers."""
+        self.reboot()
+        await ctx.send('\N{OK HAND SIGN}')
 
     @command()
     async def health(self, ctx: Context):
