@@ -160,14 +160,17 @@ class Poller:
         #: The `dict` containing poller tasks for this Poller cog instance.
         self._poller_tasks = {}
 
-        # create pollers.
-        self._create_pollers()
+    async def on_ready(self):
+        """Create pollers upon ready."""
+        self.reboot()
 
     def __unload(self):
+        """Called when this extension gets unloaded."""
         self.session.close()
         self._stop_pollers()
 
     def _stop_pollers(self):
+        """Stops all pollers."""
         # stop all pollers.
         for task in self._poller_tasks.values():
             task.cancel()
