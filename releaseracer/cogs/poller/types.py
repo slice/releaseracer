@@ -19,7 +19,7 @@ class ReleaseTracker:
         self.storage = JSONStorage('releases.json', loop=bot.loop)
 
     async def track(self, release):
-        key = 'last_release' + release.channel.name
+        key = 'last_release_' + release.channel.name.lower()
 
         # get last release from storage
         last_release = self.storage.get(key, None)
