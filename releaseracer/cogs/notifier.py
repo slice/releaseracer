@@ -3,7 +3,7 @@ import logging
 import discord
 
 from releaseracer.bot import ReleaseRacer
-from releaseracer.cogs.poller import ReleaseBuildInfo
+from .poller.types import ReleaseBuildInfo
 
 
 class Notifier:
@@ -20,14 +20,16 @@ class Notifier:
 
         self.log.info('new build! %s', release.release_build)
 
-        for channel_id, channels in self.feeds.items():
+        # iterate through all feeds
+        for channel_id, feeds in self.feeds.items():
+            # grab channel
             channel = self.bot.get_channel(int(channel_id))
 
             if not channel:
                 self.log.warning('feed channel "%d" not found, ignoring', channel_id)
                 continue
 
-            if release.channel.name.lower() not in channels:
+            if release.channel.name.lower() not in feeds:
                 continue
 
             self.log.info('notifying channel %s of new release (%s, %s)',
@@ -35,8 +37,8 @@ class Notifier:
 
             try:
                 await channel.send(embed=release.embed)
-            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
-                self.log.warning('inaccessible feed channel id "%d", ignoring', channel_id)
+            except discord.HTTPException as exception:
+                self.log.warning('feed channel error (id "%d"), ignoring - %s', channel_id, exception)
 
 
 def setup(bot: ReleaseRacer):

@@ -1,139 +1,14 @@
 import asyncio
-import collections
-import datetime
-import enum
-import json
 import logging
-import re
-from typing import Any
 
 import aiohttp
-import discord
-import pytz
-from discord.ext.commands import command, is_owner, Context
+from discord.ext.commands import command, is_owner, Context, group
 
 from releaseracer.bot import ReleaseRacer
-
-# A regex that processes script tags returned by Discord.
-SCRIPT_TAG_REGEX = re.compile(
-    r"<script src=\"/assets/([a-f0-9]+)\.js\" [^>]+></script>"
-)
-
-# A regex that extracts the release build from the main JS file.
-RELEASE_BUILD_REGEX = re.compile(
-    r"{environment:\"[a-z]+\",release:\"(\d+)\",ign"
-)
-
-
-class ReleaseChannel(enum.Enum):
-    STABLE = enum.auto()
-    PTB = enum.auto()
-    CANARY = enum.auto()
-
-
-#: Release build information.
-ReleaseHashes = collections.namedtuple('ReleaseHashes', 'vendor i18n main')
-
-
-HASH_FIELD = """
-main    {hashes.main}
-vendor  {hashes.vendor}
-i18n    {hashes.i18n}
-"""
-
-
-def _format_size(byte_amount: int) -> str:
-    return f'{round(byte_amount / (10 ** 6), 2)} MB'
-
-
-def _format_datetime(dt: datetime.datetime, *, twenty_four=False) -> str:
-    return dt.strftime('%d/%m ' + ('%H:%M' if twenty_four else '%I:%M %p'))
-
-
-class ReleaseBuildInfo(collections.namedtuple('ReleaseBuildInfo', 'channel hashes release_build size')):
-    """Release build information."""
-
-    @property
-    def color(self):
-        if self.channel is ReleaseChannel.STABLE or self.channel is ReleaseChannel.PTB:
-            return discord.Color.blurple()
-        elif self.channel is ReleaseChannel.CANARY:
-            return discord.Color.gold()
-
-    @property
-    def embed(self):
-        release_channel_name = self.channel.name.title().replace('Ptb', 'PTB')
-
-        embed = discord.Embed(title=f'{release_channel_name} build `{self.release_build}`', color=self.color)
-        embed.description = '`' + HASH_FIELD.format(hashes=self.hashes) + '`'
-
-        embed.add_field(name='Size', value=_format_size(self.size), inline=False)
-
-        california_time = datetime.datetime.now(pytz.timezone('US/Pacific'))
-        embed.set_footer(text=f'{_format_datetime(datetime.datetime.utcnow())} UTC'
-                              f', {_format_datetime(california_time)} Pacific',
-                         icon_url='https://cdn.discordapp.com/emojis/286248029931962368.png')
-        return embed
-
-
-class ReleaseExtractorError(Exception):
-    """
-    An error thrown by the release extractor.
-    """
-
-
-class JSONStorage:
-    def __init__(self, file_name: str, *, loop: asyncio.AbstractEventLoop):
-        self.file_name = file_name
-        self.loop = loop
-
-        try:
-            with open(self.file_name, 'r') as fp:
-                self._data = json.load(fp)
-        except FileNotFoundError:
-            self._data = {}
-
-    def _save(self):
-        with open(self.file_name, 'w') as fp:
-            json.dump(self._data, fp)
-
-    async def save(self):
-        """Saves the data."""
-        await self.loop.run_in_executor(None, self._save)
-
-    async def put(self, key: str, value: Any):
-        """Puts data."""
-        self._data[key] = value
-        await self.save()
-
-    def get(self, *args, **kwargs):
-        return self._data.get(*args, **kwargs)
-
-
-class ReleaseTracker:
-    def __init__(self, bot: ReleaseRacer):
-        self.bot = bot
-        self.log = logging.getLogger(__name__)
-        self.storage = JSONStorage('releases.json', loop=bot.loop)
-
-    async def track(self, release: ReleaseBuildInfo):
-        key = 'last_release' + release.channel.name
-
-        # get last release from storage
-        last_release = self.storage.get(key, None)
-
-        # new build!
-        if last_release is None or last_release != release.release_build:
-            self.log.info('detected new build: %s (%s)', release.release_build, release.channel)
-
-            # store this build
-            await self.storage.put(key, release.release_build)
-
-            # dispatch
-            self.bot.dispatch('new_build', release)
-        else:
-            # stale
-            self.log.info('stale build: %s (%s)', release.release_build, release.channel)
+from releaseracer.formatting import get_traceback
+from .types import ReleaseTracker, ReleaseChannel, ReleaseBuildInfo, ReleaseHashes
+from .errors import ReleaseExtractorError
+from .constants import SCRIPT_TAG_REGEX, RELEASE_BUILD_REGEX
 
 
 class Poller:
@@ -188,7 +63,8 @@ class Poller:
             self.log.info('%s: boot', channel)
             self._poller_tasks[channel.name.lower()] = self.bot.loop.create_task(self._make_poller(channel))
 
-    def get_login_page(self, channel: ReleaseChannel) -> str:
+    @staticmethod
+    def get_login_page(channel: ReleaseChannel) -> str:
         """Returns the login page URL for a channel."""
         base = 'https://{channel_name}discordapp.com/login'
 
@@ -197,14 +73,15 @@ class Poller:
         else:
             return base.format(channel_name=channel.name.lower() + '.')
 
-    def get_asset_url(self, channel: ReleaseChannel, hash: str) -> str:
+    @staticmethod
+    def get_asset_url(channel: ReleaseChannel, asset_hash: str) -> str:
         """Returns the asset URL for a JS hash."""
         base = 'https://{channel_name}discordapp.com/assets/{hash}.js'
 
         if channel is ReleaseChannel.STABLE:
-            return base.format(channel_name='', hash=hash)
+            return base.format(channel_name='', hash=asset_hash)
         else:
-            return base.format(channel_name=channel.name.lower() + '.', hash=hash)
+            return base.format(channel_name=channel.name.lower() + '.', hash=asset_hash)
 
     async def get_release_build_information(self, channel: ReleaseChannel) -> ReleaseBuildInfo:
         """Extracts release build information from Discord."""
@@ -300,7 +177,7 @@ class Poller:
         self.reboot()
         await ctx.send('\N{OK HAND SIGN}')
 
-    @command()
+    @group(invoke_without_command=True)
     async def health(self, ctx: Context):
         """Shows health of the pollers."""
         text = ''
@@ -308,11 +185,35 @@ class Poller:
         skull_emoji = '\N{SKULL AND CROSSBONES}'
         thumbs_up_emoji = '\N{THUMBS UP SIGN}'
 
-        for poller_name, poller_task in self._poller_tasks.items():
-            text += f'`{poller_name}`: {skull_emoji if poller_task.cancelled() else thumbs_up_emoji}\n'
+        for name, task in self._poller_tasks.items():
+            text += f'`{name}`: {skull_emoji if task.done() else thumbs_up_emoji}\n'
 
         await ctx.send(text)
 
+    @health.command()
+    async def error(self, ctx: Context, poller):
+        """Shows the error of a poller."""
+        task = self._poller_tasks.get(poller, None)
 
-def setup(bot):
-    bot.add_cog(Poller(bot))
+        if not task:
+            return await ctx.send('Poller not found.')
+
+        try:
+            exception = task.exception()
+        except asyncio.InvalidStateError:
+            return await ctx.send('That poller is fine.')
+
+        await ctx.send('```py\n{}\n```'.format(get_traceback(exception)))
+
+    @health.command()
+    async def errors(self, ctx: Context):
+        """Shows the errors of the pollers."""
+        text = ''
+
+        for name, task in self._poller_tasks.items():
+            try:
+                text += f'`{name}`: `{task.exception()}`\n'
+            except asyncio.InvalidStateError:
+                text += f'`{name}`: \N{THUMBS UP SIGN}\n'
+
+        await ctx.send(text or 'All good! \N{THUMBS UP SIGN}')
