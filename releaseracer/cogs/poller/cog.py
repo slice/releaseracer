@@ -107,7 +107,7 @@ class Poller:
             release_hashes = ReleaseHashes(vendor=hashes[0], i18n=hashes[1], main=hashes[2])
 
             # fetch main js file
-            async with self.session.get(self.get_asset_url(channel, release_hashes.main)) as resp:
+            async with self.session.get(self.get_asset_url(channel, release_hashes.main), timeout=10) as resp:
                 # read js
                 main = await resp.text()
 
@@ -146,6 +146,10 @@ class Poller:
                 except ReleaseExtractorError:
                     self.log.exception('release extractor threw an error:')
                     break
+                except asyncio.TimeoutError:
+                    # retry upon timeout error
+                    self.log.warning('timed out, retrying.')
+                    continue
                 except aiohttp.ClientError:
                     self.log.exception('aiohttp threw an error:')
                     break
