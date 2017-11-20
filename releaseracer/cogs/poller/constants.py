@@ -13,6 +13,5 @@ RELEASE_BUILD_REGEX = re.compile(
 HASH_FIELD = """
 main    {hashes.main}
 vendor  {hashes.vendor}
-i18n    {hashes.i18n}
 """
 

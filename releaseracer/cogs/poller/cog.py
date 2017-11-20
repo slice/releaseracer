@@ -104,7 +104,7 @@ class Poller:
                 raise ReleaseExtractorError(f'{channel}: failed to match script tags')
 
             # extract the js hashes from the groups
-            release_hashes = ReleaseHashes(vendor=hashes[0], i18n=hashes[1], main=hashes[2])
+            release_hashes = ReleaseHashes(vendor=hashes[0], main=hashes[1])
 
             # fetch main js file
             async with self.session.get(self.get_asset_url(channel, release_hashes.main), timeout=10) as resp:

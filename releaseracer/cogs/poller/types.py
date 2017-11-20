@@ -71,4 +71,4 @@ class ReleaseChannel(enum.Enum):
 
 
 #: Release build information.
-ReleaseHashes = collections.namedtuple('ReleaseHashes', 'vendor i18n main')
+ReleaseHashes = collections.namedtuple('ReleaseHashes', 'vendor main')
